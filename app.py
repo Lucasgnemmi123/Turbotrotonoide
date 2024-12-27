@@ -117,6 +117,30 @@ def handle_invoice_processing(invoice_data):
     loop.run_until_complete(save_invoice_data(invoice_data))
     loop.close()
 
+# Helper function to process the file and get Gemini's response
+def process_and_get_invoice_data(uploaded_file=None, image_data=None, is_pdf=False):
+    try:
+        if uploaded_file:
+            if uploaded_file.type.startswith("image/"):
+                image_parts = input_image_details(uploaded_file)
+                response = get_gemini_response(input_prompt, image=image_parts)
+            elif is_pdf:
+                pdf_data = process_pdf_file(uploaded_file)
+                if pdf_data['type'] == "text":
+                    response = get_gemini_response(input_prompt, text=pdf_data['content'])
+                else:
+                    response = get_gemini_response(input_prompt, image=pdf_data['content'])
+        elif image_data:
+            # If image data is provided (e.g., from the camera capture)
+            response = get_gemini_response(input_prompt, image=image_data)
+
+        # Extract JSON from the response
+        invoice_data = extract_json_from_response(response)
+        return invoice_data
+    except Exception as e:
+        st.error(f"Error: {e}")
+        return None
+
 # Initialize Streamlit app
 st.set_page_config(page_title='Modelo 1.0 Extraccion de Facturas', layout='centered')
 
@@ -186,16 +210,13 @@ with col1:
             image.save(buffered, format="PNG")
             image_bytes = buffered.getvalue()
 
-            response = get_gemini_response(input_prompt, image=[{"mime_type": "image/png", "data": image_bytes}])
+            invoice_data = process_and_get_invoice_data(image_data=[{"mime_type": "image/png", "data": image_bytes}])
 
-            # Extract JSON from the response
-            invoice_data = extract_json_from_response(response)
-
-            st.subheader("Extracted Data")
-            st.json(invoice_data, expanded=False)
-
-            handle_invoice_processing(invoice_data)
-            st.success("Invoice data successfully saved to the database.")
+            if invoice_data:
+                st.subheader("Extracted Data")
+                st.json(invoice_data, expanded=False)
+                handle_invoice_processing(invoice_data)
+                st.success("Invoice data successfully saved to the database.")
         except Exception as e:
             st.error(f"Error: {e}")
 
@@ -204,21 +225,11 @@ with col2:
     uploaded_file = st.file_uploader("Upload an invoice file", type=["pdf", "png", "jpg", "jpeg"])
     if uploaded_file:
         if uploaded_file.type.startswith("image/"):
-            image_parts = input_image_details(uploaded_file)
-            response = get_gemini_response(input_prompt, image=image_parts)
-            invoice_data = extract_json_from_response(response)
-            st.subheader("Extracted Data")
-            st.json(invoice_data, expanded=False)
-            handle_invoice_processing(invoice_data)
-            st.success("Invoice data successfully saved to the database.")
+            invoice_data = process_and_get_invoice_data(uploaded_file=uploaded_file)
         elif uploaded_file.type == "application/pdf":
-            pdf_data = process_pdf_file(uploaded_file)
-            if pdf_data['type'] == "text":
-                response = get_gemini_response(input_prompt, text=pdf_data['content'])
-            else:
-                response = get_gemini_response(input_prompt, image=pdf_data['content'])
-            
-            invoice_data = extract_json_from_response(response)
+            invoice_data = process_and_get_invoice_data(uploaded_file=uploaded_file, is_pdf=True)
+
+        if invoice_data:
             st.subheader("Extracted Data")
             st.json(invoice_data, expanded=False)
             handle_invoice_processing(invoice_data)
