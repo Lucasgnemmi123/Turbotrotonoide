@@ -217,13 +217,9 @@ with col2:
                 response = get_gemini_response(input_prompt, text=pdf_data['content'])
             else:
                 response = get_gemini_response(input_prompt, image=pdf_data['content'])
+            
             invoice_data = extract_json_from_response(response)
             st.subheader("Extracted Data")
             st.json(invoice_data, expanded=False)
             handle_invoice_processing(invoice_data)
             st.success("Invoice data successfully saved to the database.")
-
-# Footer
-st.markdown("""
-    <p style="font-size:20px; text-align:center; color: gray;">Test model trained by Lucas Gnemmi. Commercial use is prohibited.</p>
-""", unsafe_allow_html=True)
