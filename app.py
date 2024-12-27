@@ -217,7 +217,7 @@ with col1:
                 st.json(invoice_data, expanded=False)
                 handle_invoice_processing(invoice_data)
                 st.success("Invoice data successfully saved to the database.")
-        except Exception as e:
+        except Exception as e:  
             st.error(f"Error: {e}")
 
 with col2:
