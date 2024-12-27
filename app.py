@@ -41,8 +41,9 @@ If any data is missing, use `null`. Double-check product codes if necessary.
 # Function to get response from Gemini
 def get_gemini_response(input_prompt, content):
     try:
-        response = genai.generate_text(input_prompt, content=content)
-        return response.text
+        # Updated way to generate text using Gemini
+        response = genai.generate(model="models/text-bison-001", prompt=f"{input_prompt}\n\n{content}")
+        return response.generations[0].text if response and response.generations else None
     except Exception as e:
         st.error(f"Error communicating with Gemini: {e}")
         return None
