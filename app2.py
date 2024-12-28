@@ -1,5 +1,4 @@
 import toml
-import psycopg2
 import streamlit as st
 from PIL import Image
 import google.generativeai as genai
@@ -17,17 +16,20 @@ genai.configure(api_key=config["gemini"]["api_key"])
 # Configurar el modelo Gemini
 model = genai.GenerativeModel('gemini-1.5-flash')
 
-# Function to get response from Gemini
+# Función para obtener respuesta de Gemini
 def get_gemini_response(input_prompt, image=None, text=None):
-    if text:
-        response = model.generate_content([input_prompt, text])
-    elif image:
-        response = model.generate_content([input_prompt, image[0]])
-    return response.text
+    try:
+        if text:
+            response = model.generate_content([input_prompt, text])
+        elif image:
+            response = model.generate_content([input_prompt, image[0]])
+        return response.text
+    except Exception as e:
+        raise ValueError(f"Error al obtener respuesta de Gemini: {e}")
 
 # Función para manejar los detalles de la imagen cargada
 def input_image_details(uploaded_file):
-    if uploaded_file is not None:
+    if uploaded_file:
         bytes_data = uploaded_file.read()
         image_parts = [{"mime_type": uploaded_file.type, "data": bytes_data}]
         return image_parts
@@ -39,19 +41,13 @@ def process_pdf_file(uploaded_file):
     try:
         doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
         pdf_text = ""
-        for page_number in range(len(doc)):
-            page = doc[page_number]
+        for page in doc:
             pdf_text += page.get_text("text")
 
         if pdf_text.strip():
             return {"type": "text", "content": pdf_text}
         else:
-            images = []
-            for page_number in range(len(doc)):
-                page = doc[page_number]
-                pix = page.get_pixmap()
-                image_data = pix.tobytes("png")
-                images.append({"mime_type": "image/png", "data": image_data})
+            images = [{"mime_type": "image/png", "data": page.get_pixmap().tobytes("png")} for page in doc]
             return {"type": "image", "content": images}
     except Exception as e:
         raise ValueError(f"Error procesando el archivo PDF: {e}")
@@ -73,21 +69,20 @@ def extract_json_from_response(response_text):
 async def get_db_connection():
     try:
         conn = await asyncpg.connect(
-            user=config["db"]["user"],
-            password=config["db"]["password"],
-            database=config["db"]["database"],
-            host=config["db"]["host"],
-            port=config["db"]["port"]
+            user=config["database"]["user"],
+            password=config["database"]["password"],
+            database=config["database"]["name"],  # Ajustado para coincidir con el archivo .toml
+            host=config["database"]["host"],
+            port=int(config["database"]["port"])
         )
         return conn
     except Exception as e:
-        st.error(f"Error de conexión a la base de datos: {e}")
-        return None
+        raise ValueError(f"Error de conexión a la base de datos: {e}")
 
 # Función para guardar los datos de la factura en la base de datos
 async def save_invoice_data(invoice_data):
     conn = await get_db_connection()
-    if conn is None:
+    if not conn:
         raise Exception("No se pudo establecer una conexión con la base de datos.")
     try:
         for product in invoice_data['Detalles de Productos']:
@@ -132,7 +127,7 @@ st.markdown("""<p style="color:red; font-size:16px;"><strong>Importante:</strong
 # Cargador de archivos
 uploaded_file = st.file_uploader("Sube una imagen o archivo PDF de factura...", type=["jpg", "jpeg", "png", "pdf"])
 
-if uploaded_file is not None:
+if uploaded_file:
     pdf_info = process_pdf_file(uploaded_file)
     if pdf_info["type"] == "image":
         st.sidebar.image(pdf_info["content"][0]['data'], caption="Imagen extraída del PDF.", use_container_width=True)
