@@ -6,6 +6,7 @@ import asyncio
 import fitz  # PyMuPDF
 import streamlit as st
 import json
+import requests  # Asegúrate de importar requests
 
 # Cargar la configuración desde el archivo TOML
 def load_config():
@@ -17,6 +18,19 @@ config = load_config()
 
 # Configurar la API de Gemini
 genai.configure(api_key=config["gemini"]["api_key"])
+
+# Función para obtener la respuesta de Gemini
+def get_gemini_response(prompt, text=None, image=None):
+    try:
+        if text:
+            response = genai.generate_text(prompt=prompt, input_text=text)
+        elif image:
+            response = genai.generate_text(prompt=prompt, input_image=image)
+        else:
+            raise ValueError("Debe proporcionar texto o imagen para procesar.")
+        return response.text
+    except Exception as e:
+        raise ValueError(f"Error al obtener la respuesta de Gemini: {e}")
 
 # Función para obtener la conexión a PostgreSQL usando psycopg2
 def get_postgresql_connection():
