@@ -127,6 +127,15 @@ st.markdown("""<p style="color:red; font-size:16px;"><strong>Importante:</strong
 # Cargador de archivos
 uploaded_file = st.file_uploader("Sube una imagen o archivo PDF de factura...", type=["jpg", "jpeg", "png", "pdf"])
 
+# Captura de imagen desde la cámara
+camera_input = st.camera_input("Captura una imagen desde la cámara")
+
+if camera_input:
+    # Si la imagen es tomada con la cámara, se maneja aquí
+    st.image(camera_input, caption="Imagen Capturada", use_column_width=True)
+    # Puedes procesar la imagen capturada de la misma manera que un archivo cargado
+
+# Si se ha cargado un archivo PDF
 if uploaded_file:
     pdf_info = process_pdf_file(uploaded_file)
     if pdf_info["type"] == "image":
@@ -160,6 +169,7 @@ if submit:
         Si falta algún dato, usa `null`. Verifica los códigos de producto si es necesario.
         """
 
+        # Procesar ya sea texto o imagen
         if pdf_info["type"] == "text":
             response = get_gemini_response(input_prompt, text=pdf_info["content"])
         else:
