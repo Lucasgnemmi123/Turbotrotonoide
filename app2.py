@@ -6,6 +6,9 @@ import json
 import asyncpg  # type: ignore
 import asyncio
 import fitz  # PyMuPDF
+from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
+import numpy as np
+import io
 
 # Cargar configuraciones desde config.toml
 config = toml.load("config.toml")
@@ -111,85 +114,53 @@ def handle_invoice_processing(invoice_data):
     loop.run_until_complete(save_invoice_data(invoice_data))
     loop.close()
 
+# Clase para procesar el video de la cámara
+class VideoTransformer(VideoTransformerBase):
+    def __init__(self):
+        self.image = None
+
+    def transform(self, frame):
+        self.image = frame.to_image()
+        return frame
+
 # Inicializar la aplicación Streamlit
 st.set_page_config(page_title='Modelo 1.0 Extracción de Facturas', layout='centered')
 
-# Estilo para la aplicación (CSS)
-st.markdown("""
-    <style>
-        /* Estilo general de la página */
-        .reportview-container {
-            max-width: 1000px;
-            margin: 0 auto;
-        }
-        .sidebar .sidebar-content {
-            padding-top: 20px;
-        }
-        h1 {
-            font-size: 1.8rem;
-            text-align: center;
-            color: #3f3f3f;
-        }
-        .stTextInput input {
-            font-size: 16px;
-        }
-        /* Botón de acción */
-        .stButton button {
-            background-color: #4CAF50;
-            color: white;
-            padding: 12px 24px;
-            border: none;
-            cursor: pointer;
-            font-size: 16px;
-            border-radius: 8px;
-            transition: background-color 0.3s;
-        }
-        .stButton button:hover {
-            background-color: #45a049;
-        }
-        /* Estilos para móviles y tabletas */
-        @media (max-width: 768px) {
-            .stButton button {
-                width: 100%;
-                font-size: 14px;
-                padding: 10px 20px;
-            }
-            .reportview-container {
-                max-width: 100%;
-                padding: 10px;
-            }
-            h1 {
-                font-size: 1.5rem;
-            }
-        }
-    </style>
-""", unsafe_allow_html=True)
+# Limitar el ancho de la página
+st.markdown("""<style>.reportview-container { max-width: 1000px; margin: 0 auto; }</style>""", unsafe_allow_html=True)
 
 # Mensaje de bienvenida y título
 st.title('Modelo 1.0 Extracción de Facturas')
 st.write("Extrae información de facturas usando este modelo basado en Gemini 1.5 Flash y guarda los datos en PostgreSQL.")
 
 # Recomendación de calidad
-st.markdown("""<p style="color:red; font-size:16px; text-align:center;"><strong>Importante:</strong> Los resultados pueden no ser 100% precisos con imágenes de baja calidad.</p>""", unsafe_allow_html=True)
+st.markdown("""<p style="color:red; font-size:16px;"><strong>Importante:</strong> Los resultados pueden no ser 100% precisos con imágenes de baja calidad.</p>""", unsafe_allow_html=True)
 
-# Cargador de archivos
-uploaded_file = st.file_uploader("Sube una imagen o archivo PDF de factura...", type=["jpg", "jpeg", "png", "pdf"])
+# Selección de método para cargar la imagen
+option = st.radio("Selecciona cómo cargar la factura", ("Subir archivo", "Tomar foto"))
 
-# Captura de imagen desde la cámara
-camera_input = st.camera_input("Captura una imagen desde la cámara")
+if option == "Subir archivo":
+    uploaded_file = st.file_uploader("Sube una imagen o archivo PDF de factura...", type=["jpg", "jpeg", "png", "pdf"])
 
-# Procesar el archivo cargado o la foto de la cámara
-pdf_info = None
-if uploaded_file:
-    pdf_info = process_pdf_file(uploaded_file)
-elif camera_input:
-    pdf_info = {"type": "image", "content": [{"mime_type": "image/jpeg", "data": camera_input.getvalue()}]}
+    if uploaded_file:
+        pdf_info = process_pdf_file(uploaded_file)
+        if pdf_info["type"] == "image":
+            st.sidebar.image(pdf_info["content"][0]['data'], caption="Imagen extraída del PDF.", use_container_width=True)
+        else:
+            st.sidebar.text_area("Texto extraído del PDF", pdf_info["content"], height=200)
 
-# Si se ha cargado un archivo PDF
-if pdf_info and pdf_info["type"] == "image":
-    st.sidebar.image(pdf_info["content"][0]['data'], caption="Imagen extraída del PDF.", use_container_width=True)
-elif pdf_info and pdf_info["type"] == "text":
-    st.sidebar.text_area("Texto extraído del PDF", pdf_info["content"], height=200)
+elif option == "Tomar foto":
+    webrtc_streamer(key="example", video_transformer_factory=VideoTransformer)
+
+    if st.button("Procesar foto tomada"):
+        if not VideoTransformer.image:
+            st.warning("No se ha tomado ninguna foto aún.")
+        else:
+            st.image(VideoTransformer.image, caption="Foto tomada", use_column_width=True)
+            image_data = io.BytesIO()
+            VideoTransformer.image.save(image_data, format="PNG")
+            image_data.seek(0)
+            pdf_info = {"type": "image", "content": [{"mime_type": "image/png", "data": image_data.read()}]}
 
 # Botón para procesar la factura
 submit = st.button('Procesar Factura')
@@ -217,7 +188,6 @@ if submit:
         Si falta algún dato, usa `null`. Verifica los códigos de producto si es necesario.
         """
 
-        # Procesar ya sea texto o imagen
         if pdf_info["type"] == "text":
             response = get_gemini_response(input_prompt, text=pdf_info["content"])
         else:
@@ -234,4 +204,4 @@ if submit:
         st.error(f"Error: {e}")
 
 # Footer
-st.markdown("""<p style="font-size:16px; text-align:center; color: gray;">Test model trained by Lucas Gnemmi. Commercial use is prohibited.</p>""", unsafe_allow_html=True)
+st.markdown("""<p style="font-size:20px; text-align:center; color: gray;">Test model trained by Lucas Gnemmi. Commercial use is prohibited.</p>""", unsafe_allow_html=True)
