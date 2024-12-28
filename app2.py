@@ -1,64 +1,40 @@
 import toml
-import google.generativeai as genai
 import psycopg2
-from sqlalchemy import create_engine
+import streamlit as st
+from PIL import Image
+import google.generativeai as genai
+import json
+import asyncpg  # type: ignore
 import asyncio
 import fitz  # PyMuPDF
-import streamlit as st
-import json
-import requests  # Asegúrate de importar requests
 
-# Cargar la configuración desde el archivo TOML
-def load_config():
-    config = toml.load("config.toml")
-    return config
+# Cargar configuraciones desde config.toml
+config = toml.load("config.toml")
 
-# Cargar configuración
-config = load_config()
-
-# Configurar la API de Gemini
+# Configuración de Gemini API
 genai.configure(api_key=config["gemini"]["api_key"])
 
-# Función para obtener la respuesta de Gemini
-def get_gemini_response(prompt, text=None, image=None):
-    try:
-        if text:
-            response = genai.generate_text(prompt=prompt, input_text=text)
-        elif image:
-            response = genai.generate_text(prompt=prompt, input_image=image)
-        else:
-            raise ValueError("Debe proporcionar texto o imagen para procesar.")
-        return response.text
-    except Exception as e:
-        raise ValueError(f"Error al obtener la respuesta de Gemini: {e}")
+# Configurar el modelo Gemini
+model = genai.GenerativeModel('gemini-1.5-flash')
 
-# Función para obtener la conexión a PostgreSQL usando psycopg2
-def get_postgresql_connection():
-    try:
-        connection = psycopg2.connect(
-            host=config["database"]["host"],
-            port=config["database"]["port"],
-            user=config["database"]["user"],
-            password=config["database"]["password"],
-            database=config["database"]["name"]
-        )
-        return connection
-    except Exception as e:
-        st.error(f"Error de conexión a la base de datos PostgreSQL: {e}")
-        return None
+# Function to get response from Gemini
+def get_gemini_response(input_prompt, image=None, text=None):
+    if text:
+        response = model.generate_content([input_prompt, text])
+    elif image:
+        response = model.generate_content([input_prompt, image[0]])
+    return response.text
 
-# Función para establecer la conexión con MySQL usando SQLAlchemy
-def get_mysql_connection():
-    try:
-        engine = create_engine(
-            f"mysql+pymysql://{config['database']['user']}:{config['database']['password']}@{config['database']['host']}:{config['database']['port']}/{config['database']['name']}"
-        )
-        return engine.connect()
-    except Exception as e:
-        st.error(f"Error de conexión a MySQL: {e}")
-        return None
+# Función para manejar los detalles de la imagen cargada
+def input_image_details(uploaded_file):
+    if uploaded_file is not None:
+        bytes_data = uploaded_file.read()
+        image_parts = [{"mime_type": uploaded_file.type, "data": bytes_data}]
+        return image_parts
+    else:
+        raise FileNotFoundError("No se ha cargado ningún archivo.")
 
-# Función para procesar el archivo PDF
+# Función para procesar archivos PDF
 def process_pdf_file(uploaded_file):
     try:
         doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
@@ -78,7 +54,7 @@ def process_pdf_file(uploaded_file):
                 images.append({"mime_type": "image/png", "data": image_data})
             return {"type": "image", "content": images}
     except Exception as e:
-        raise ValueError(f"Error al procesar el archivo PDF: {e}")
+        raise ValueError(f"Error procesando el archivo PDF: {e}")
 
 # Función para extraer JSON de la respuesta de Gemini
 def extract_json_from_response(response_text):
@@ -89,60 +65,72 @@ def extract_json_from_response(response_text):
             json_data = response_text[start_idx:end_idx + 1]
             return json.loads(json_data)
         else:
-            raise ValueError("JSON no encontrado en la respuesta.")
+            raise ValueError("No se encontró JSON en la respuesta.")
     except Exception as e:
         raise ValueError(f"Error al analizar JSON: {e}")
 
+# Función para establecer conexión con la base de datos
+async def get_db_connection():
+    try:
+        conn = await asyncpg.connect(
+            user=config["db"]["user"],
+            password=config["db"]["password"],
+            database=config["db"]["database"],
+            host=config["db"]["host"],
+            port=config["db"]["port"]
+        )
+        return conn
+    except Exception as e:
+        st.error(f"Error de conexión a la base de datos: {e}")
+        return None
+
 # Función para guardar los datos de la factura en la base de datos
 async def save_invoice_data(invoice_data):
-    connection = await get_postgresql_connection()
-    if connection is None:
-        raise Exception("No se pudo establecer la conexión a la base de datos.")
+    conn = await get_db_connection()
+    if conn is None:
+        raise Exception("No se pudo establecer una conexión con la base de datos.")
     try:
-        cursor = connection.cursor()
         for product in invoice_data['Detalles de Productos']:
-            # Verificar si la factura ya está registrada
-            cursor.execute(
-                """SELECT 1 FROM facturas WHERE invoice_number = %s AND product_code = %s LIMIT 1;""",
-                (invoice_data['Número de Factura'], product['Codigo Producto'])
+            existing_entry = await conn.fetchval(
+                """SELECT 1 FROM facturas WHERE invoice_number = $1 AND product_code = $2 LIMIT 1;""",
+                invoice_data['Número de Factura'], product['Codigo Producto']
             )
-            if cursor.fetchone():
-                continue  # No insertar si ya existe
-            cursor.execute(
+            if existing_entry:
+                continue
+            await conn.execute(
                 """INSERT INTO facturas (invoice_number, date, client_name, provider_name, total, product_code, product_description, product_quantity)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s);""",
-                (invoice_data['Número de Factura'], invoice_data['Fecha'], invoice_data['Nombre del Cliente'],
-                 invoice_data['Nombre del Proveedor'], str(invoice_data['Total']),
-                 product['Codigo Producto'], product['Descripcion producto'], product['Cantidad'])
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8);""",
+                invoice_data['Número de Factura'], invoice_data['Fecha'], invoice_data['Nombre del Cliente'],
+                invoice_data['Nombre del Proveedor'], str(invoice_data['Total']),
+                product['Codigo Producto'], product['Descripcion producto'], product['Cantidad']
             )
-        connection.commit()
     except Exception as e:
-        raise Exception(f"Error al guardar los datos en la base de datos: {e}")
+        raise Exception(f"Error guardando datos en la base de datos: {e}")
     finally:
-        connection.close()
+        await conn.close()
 
-# Función para manejar el procesamiento de la factura de forma asíncrona
+# Función para manejar el procesamiento asincrónico en Streamlit
 def handle_invoice_processing(invoice_data):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(save_invoice_data(invoice_data))
     loop.close()
 
-# Configuración de la interfaz de Streamlit
+# Inicializar la aplicación Streamlit
 st.set_page_config(page_title='Modelo 1.0 Extracción de Facturas', layout='centered')
 
 # Limitar el ancho de la página
-st.markdown("""<style>.reportview-container {max-width: 1000px; margin: 0 auto;}</style>""", unsafe_allow_html=True)
+st.markdown("""<style>.reportview-container { max-width: 1000px; margin: 0 auto; }</style>""", unsafe_allow_html=True)
 
 # Mensaje de bienvenida y título
 st.title('Modelo 1.0 Extracción de Facturas')
-st.write("Extrae la información de la factura utilizando este modelo basado en Gemini 1.5 Flash y guarda los datos en PostgreSQL.")
+st.write("Extrae información de facturas usando este modelo basado en Gemini 1.5 Flash y guarda los datos en PostgreSQL.")
 
 # Recomendación de calidad
-st.markdown("""<p style="color:red; font-size:16px;"><strong>Importante:</strong> Los resultados pueden no ser 100% precisos con imágenes de baja calidad. Siempre usa imágenes de alta resolución o PDFs con texto seleccionable para obtener los mejores resultados.</p>""", unsafe_allow_html=True)
+st.markdown("""<p style="color:red; font-size:16px;"><strong>Importante:</strong> Los resultados pueden no ser 100% precisos con imágenes de baja calidad.</p>""", unsafe_allow_html=True)
 
-# Cargar archivo
-uploaded_file = st.file_uploader("Sube una imagen o PDF de factura...", type=["jpg", "jpeg", "png", "pdf"])
+# Cargador de archivos
+uploaded_file = st.file_uploader("Sube una imagen o archivo PDF de factura...", type=["jpg", "jpeg", "png", "pdf"])
 
 if uploaded_file is not None:
     pdf_info = process_pdf_file(uploaded_file)
@@ -151,13 +139,13 @@ if uploaded_file is not None:
     else:
         st.sidebar.text_area("Texto extraído del PDF", pdf_info["content"], height=200)
 
-# Procesar la factura
+# Botón para procesar la factura
 submit = st.button('Procesar Factura')
 
 if submit:
     try:
         input_prompt = """
-        Eres un experto en procesamiento de facturas. Dado una imagen o texto de una factura, extrae y devuelve los datos clave en formato JSON con esta estructura:
+        Eres un experto en procesamiento de facturas. Dada una imagen o texto de una factura, extrae y devuelve los datos clave en formato JSON con esta estructura:
 
         {
           "Número de Factura": "Valor",
@@ -174,7 +162,7 @@ if submit:
           ]
         }
 
-        Si falta algún dato, usa `null`. Revisa los códigos de producto si es necesario.
+        Si falta algún dato, usa `null`. Verifica los códigos de producto si es necesario.
         """
 
         if pdf_info["type"] == "text":
@@ -188,9 +176,9 @@ if submit:
         st.json(invoice_data, expanded=False)
 
         handle_invoice_processing(invoice_data)
-        st.success("Datos de la factura guardados con éxito en la base de datos.")
+        st.success("Los datos de la factura se guardaron correctamente en la base de datos.")
     except Exception as e:
         st.error(f"Error: {e}")
 
-# Pie de página
-st.markdown("""<p style="font-size:20px; text-align:center; color: gray;">Modelo entrenado por Lucas Gnemmi. El uso comercial está prohibido.</p>""", unsafe_allow_html=True)
+# Footer
+st.markdown("""<p style="font-size:20px; text-align:center; color: gray;">Test model trained by Lucas Gnemmi. Commercial use is prohibited.</p>""", unsafe_allow_html=True)
