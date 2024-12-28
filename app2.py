@@ -114,15 +114,63 @@ def handle_invoice_processing(invoice_data):
 # Inicializar la aplicación Streamlit
 st.set_page_config(page_title='Modelo 1.0 Extracción de Facturas', layout='centered')
 
-# Limitar el ancho de la página
-st.markdown("""<style>.reportview-container { max-width: 1000px; margin: 0 auto; }</style>""", unsafe_allow_html=True)
+# Estilo para la aplicación (CSS)
+st.markdown("""
+    <style>
+        /* Estilo general de la página */
+        .reportview-container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .sidebar .sidebar-content {
+            padding-top: 20px;
+        }
+        h1 {
+            font-size: 1.8rem;
+            text-align: center;
+            color: #3f3f3f;
+        }
+        .stTextInput input {
+            font-size: 16px;
+        }
+        /* Botón de acción */
+        .stButton button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            border-radius: 8px;
+            transition: background-color 0.3s;
+        }
+        .stButton button:hover {
+            background-color: #45a049;
+        }
+        /* Estilos para móviles y tabletas */
+        @media (max-width: 768px) {
+            .stButton button {
+                width: 100%;
+                font-size: 14px;
+                padding: 10px 20px;
+            }
+            .reportview-container {
+                max-width: 100%;
+                padding: 10px;
+            }
+            h1 {
+                font-size: 1.5rem;
+            }
+        }
+    </style>
+""", unsafe_allow_html=True)
 
 # Mensaje de bienvenida y título
 st.title('Modelo 1.0 Extracción de Facturas')
 st.write("Extrae información de facturas usando este modelo basado en Gemini 1.5 Flash y guarda los datos en PostgreSQL.")
 
 # Recomendación de calidad
-st.markdown("""<p style="color:red; font-size:16px;"><strong>Importante:</strong> Los resultados pueden no ser 100% precisos con imágenes de baja calidad.</p>""", unsafe_allow_html=True)
+st.markdown("""<p style="color:red; font-size:16px; text-align:center;"><strong>Importante:</strong> Los resultados pueden no ser 100% precisos con imágenes de baja calidad.</p>""", unsafe_allow_html=True)
 
 # Cargador de archivos
 uploaded_file = st.file_uploader("Sube una imagen o archivo PDF de factura...", type=["jpg", "jpeg", "png", "pdf"])
@@ -130,18 +178,18 @@ uploaded_file = st.file_uploader("Sube una imagen o archivo PDF de factura...", 
 # Captura de imagen desde la cámara
 camera_input = st.camera_input("Captura una imagen desde la cámara")
 
-if camera_input:
-    # Si la imagen es tomada con la cámara, se maneja aquí
-    st.image(camera_input, caption="Imagen Capturada", use_column_width=True)
-    # Puedes procesar la imagen capturada de la misma manera que un archivo cargado
-
-# Si se ha cargado un archivo PDF
+# Procesar el archivo cargado o la foto de la cámara
+pdf_info = None
 if uploaded_file:
     pdf_info = process_pdf_file(uploaded_file)
-    if pdf_info["type"] == "image":
-        st.sidebar.image(pdf_info["content"][0]['data'], caption="Imagen extraída del PDF.", use_container_width=True)
-    else:
-        st.sidebar.text_area("Texto extraído del PDF", pdf_info["content"], height=200)
+elif camera_input:
+    pdf_info = {"type": "image", "content": [{"mime_type": "image/jpeg", "data": camera_input.getvalue()}]}
+
+# Si se ha cargado un archivo PDF
+if pdf_info and pdf_info["type"] == "image":
+    st.sidebar.image(pdf_info["content"][0]['data'], caption="Imagen extraída del PDF.", use_container_width=True)
+elif pdf_info and pdf_info["type"] == "text":
+    st.sidebar.text_area("Texto extraído del PDF", pdf_info["content"], height=200)
 
 # Botón para procesar la factura
 submit = st.button('Procesar Factura')
@@ -186,4 +234,4 @@ if submit:
         st.error(f"Error: {e}")
 
 # Footer
-st.markdown("""<p style="font-size:20px; text-align:center; color: gray;">Test model trained by Lucas Gnemmi. Commercial use is prohibited.</p>""", unsafe_allow_html=True)
+st.markdown("""<p style="font-size:16px; text-align:center; color: gray;">Test model trained by Lucas Gnemmi. Commercial use is prohibited.</p>""", unsafe_allow_html=True)
