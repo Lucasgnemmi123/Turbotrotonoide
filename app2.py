@@ -19,11 +19,16 @@ model = genai.GenerativeModel('gemini-1.5-flash')
 
 # Function to get response from Gemini
 def get_gemini_response(input_prompt, image=None, text=None):
-    if text:
-        response = model.generate_content([input_prompt, text])
-    elif image:
-        response = model.generate_content([input_prompt, image[0]])
-    return response.text
+    try:
+        if text:
+            response = model.generate_content([input_prompt, text])
+        elif image:
+            response = model.generate_content([input_prompt, image[0]])
+        else:
+            raise ValueError("No valid input (image or text) provided.")
+        return response.text
+    except Exception as e:
+        raise ValueError(f"Error generating response from Gemini: {e}")
 
 # Function to handle uploaded image details
 def input_image_details(uploaded_file):
