@@ -1,0 +1,9 @@
+[database]
+host = "aws-0-sa-east-1.pooler.supabase.com"
+port = 6543
+user = "postgres.feiihevqxettiwkmlqnp"
+password = "admin"
+name = "postgres"
+
+[gemini]
+api_key = "AIzaSyBIGJYOu-Lmq2xKVEe8YsziSgBR6Avs7l0"
