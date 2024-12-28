@@ -6,9 +6,6 @@ import json
 import asyncpg  # type: ignore
 import asyncio
 import fitz  # PyMuPDF
-from streamlit_webrtc import webrtc_streamer, VideoTransformerBase
-import numpy as np
-import io
 
 # Cargar configuraciones desde config.toml
 config = toml.load("config.toml")
@@ -114,15 +111,6 @@ def handle_invoice_processing(invoice_data):
     loop.run_until_complete(save_invoice_data(invoice_data))
     loop.close()
 
-# Clase para procesar el video de la cámara
-class VideoTransformer(VideoTransformerBase):
-    def __init__(self):
-        self.image = None
-
-    def transform(self, frame):
-        self.image = frame.to_image()
-        return frame
-
 # Inicializar la aplicación Streamlit
 st.set_page_config(page_title='Modelo 1.0 Extracción de Facturas', layout='centered')
 
@@ -136,31 +124,30 @@ st.write("Extrae información de facturas usando este modelo basado en Gemini 1.
 # Recomendación de calidad
 st.markdown("""<p style="color:red; font-size:16px;"><strong>Importante:</strong> Los resultados pueden no ser 100% precisos con imágenes de baja calidad.</p>""", unsafe_allow_html=True)
 
-# Selección de método para cargar la imagen
-option = st.radio("Selecciona cómo cargar la factura", ("Subir archivo", "Tomar foto"))
+# Opción para elegir entre subir archivo o usar cámara
+input_method = st.selectbox("¿Cómo te gustaría cargar la factura?", ["Subir archivo", "Usar cámara"])
 
-if option == "Subir archivo":
+# Cargador de archivos
+uploaded_file = None
+if input_method == "Subir archivo":
     uploaded_file = st.file_uploader("Sube una imagen o archivo PDF de factura...", type=["jpg", "jpeg", "png", "pdf"])
+elif input_method == "Usar cámara":
+    uploaded_file = st.camera_input("Toma una foto de la factura")
 
-    if uploaded_file:
+# Si se ha cargado una foto o un archivo
+if uploaded_file:
+    # Procesar archivo PDF o imagen
+    if input_method == "Subir archivo":
         pdf_info = process_pdf_file(uploaded_file)
-        if pdf_info["type"] == "image":
-            st.sidebar.image(pdf_info["content"][0]['data'], caption="Imagen extraída del PDF.", use_container_width=True)
-        else:
-            st.sidebar.text_area("Texto extraído del PDF", pdf_info["content"], height=200)
+    else:
+        # Para una foto tomada con la cámara
+        image_parts = input_image_details(uploaded_file)
+        pdf_info = {"type": "image", "content": image_parts}
 
-elif option == "Tomar foto":
-    webrtc_streamer(key="example", video_transformer_factory=VideoTransformer)
-
-    if st.button("Procesar foto tomada"):
-        if not VideoTransformer.image:
-            st.warning("No se ha tomado ninguna foto aún.")
-        else:
-            st.image(VideoTransformer.image, caption="Foto tomada", use_column_width=True)
-            image_data = io.BytesIO()
-            VideoTransformer.image.save(image_data, format="PNG")
-            image_data.seek(0)
-            pdf_info = {"type": "image", "content": [{"mime_type": "image/png", "data": image_data.read()}]}
+    if pdf_info["type"] == "image":
+        st.sidebar.image(pdf_info["content"][0]['data'], caption="Imagen extraída de la factura.", use_container_width=True)
+    else:
+        st.sidebar.text_area("Texto extraído del PDF", pdf_info["content"], height=200)
 
 # Botón para procesar la factura
 submit = st.button('Procesar Factura')
